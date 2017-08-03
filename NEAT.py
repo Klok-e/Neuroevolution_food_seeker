@@ -27,7 +27,7 @@ class Connection():
         self.to_neuron.in_connections.append(self)
         self.from_neuron.out_connections.append(self)
 
-    def get_mutated_weight(self):
+    def mutate_weight(self):
         weight = self.weight
         if random.random() < Connection.CHANCE_RANDOMIZE_WEIGHT:
             weight = random.uniform(-2, 2)
@@ -44,6 +44,10 @@ class Connection():
                 self.from_neuron.transferred = 0
             return True
         return False
+
+    def terminate(self):
+        self.to_neuron.in_connections.remove(self)
+        self.from_neuron.out_connections.remove(self)
 
     def __str__(self):
         return str(round(self.weight, 4)) + ' ' + str(self.from_neuron.id) + ' ' + str(self.to_neuron.id)
@@ -122,6 +126,9 @@ class Network():
             prediction[i] = out_neur.out
         return prediction
 
+    def set_structure(self, struct):
+        self.input_neurons, self.h_neurons, self.output_neurons, self.connections = struct
+
     def get_structure_data(self):
         input_neurons = [Neuron(neu.is_output_neur, neu.is_output_neur, neu.bias) for neu in self.input_neurons]
         h_neurons = [Neuron() for neu in self.h_neurons]
@@ -153,24 +160,51 @@ class Network():
 
     def create_offspring(self):
         offspring = Network(len(self.input_neurons) - 1, len(self.output_neurons))
+        offspring.set_structure(self.get_structure_data())
 
         if random.random() < CHANCE_MUTATION:
             while True:
                 if random.random() < CHANCE_CHANGE_WEIGHT:
-                    w = random.choice(self.connections).get_mutated_weight()
-
+                    random.choice(offspring.connections).mutate_weight()
                     break
                 if random.random() < CHANCE_STRUCTURAL_CHANGE:
                     if random.random() < CHANCE_ADD_CONNECTION:
-                        pass
-                    if random.random() < CHANCE_REMOVE_CONNECTION:
-                        pass
-                    if random.random() < CHANCE_ADD_NEURON:
-                        pass
-                    if random.random() < CHANCE_REMOVE_NEURON:
-                        pass
-        else:
-            return copy.deepcopy(self)
+                        all_neurons = offspring.input_neurons + offspring.h_neurons + offspring.output_neurons
+                        while True:
+                            n1, n2 = random.choices(all_neurons, k=2)
+                            if n1.is_input_neur and n2.is_input_neur:
+                                continue
+                            elif n1.is_output_neur and n2.is_output_neur:
+                                continue
+                            else:
+                                offspring.connections.append(Connection(n1, n2))
+                                break
+                        break
+                    elif random.random() < CHANCE_REMOVE_CONNECTION:
+                        conn = random.choice(offspring.connections)
+                        conn.terminate()
+                        offspring.connections.remove(conn)
+                        break
+                    elif random.random() < CHANCE_ADD_NEURON:
+                        conn = random.choice(offspring.connections)
+                        n1, n2, w = conn.from_neuron, conn.to_neuron, conn.weight
+                        conn.terminate()
+                        offspring.connections.remove(conn)
+                        n3 = Neuron()
+                        offspring.connections.append(Connection(n1, n3, 1))
+                        offspring.connections.append(Connection(n3, n2, w))
+                        break
+                    elif random.random() < CHANCE_REMOVE_NEURON:
+                        not_connected = []
+                        for neuron in offspring.h_neurons:
+                            if len(neuron.in_connections) + len(neuron.out_connections) == 0:
+                                not_connected.append(neuron)
+                        if len(not_connected) == 0:
+                            continue
+                        to_remove = random.choice(not_connected)
+                        offspring.h_neurons.remove(to_remove)
+                        break
+        return offspring
 
 
 if __name__ == '__main__':
