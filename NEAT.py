@@ -1,7 +1,7 @@
 import numpy as np
 import random
-import neat
 import math
+import pygame
 
 
 class Connection():
@@ -10,8 +10,15 @@ class Connection():
         self.to_neuron = to_neuron
         self.from_neuron = from_neuron
 
-    def transfer(self, inp):
-        self.to_neuron.inputs.append(inp * self.weight)
+        self.to_neuron.in_connections.append(self)
+        self.from_neuron.out_connections.append(self)
+
+    def transfer(self):
+        if self.from_neuron.out != None:
+            self.to_neuron.inputs.append(self.from_neuron.out * self.weight)
+            self.from_neuron.out = None  # indicates that output has been transferred
+            return True
+        return False
 
 
 class Neuron():
@@ -22,20 +29,25 @@ class Neuron():
         self.is_output_neur = output_neur
         self.bias = bias
 
+        self.in_connections = []
+        self.out_connections = []
+
         self.inputs = []
         self.out = None
 
-        if self.bias: self.out = self.bias_out
-
     def calculate_out(self):
-        su = 0
-        for numb in self.inputs:
-            su += numb
-        if not self.is_input_neur:  # if neuron is not input
-            self.out = self.activate(su)
-        else:
-            self.out = su
-        self.inputs.clear()
+        if len(self.inputs) == len(self.in_connections):
+            su = 0
+            for numb in self.inputs:
+                su += numb
+            if not self.is_input_neur:  # if neuron is not input
+                self.out = self.activate(su)
+            elif self.bias:
+                self.out = self.bias_out
+            else:
+                self.out = su
+
+            self.inputs.clear()
 
     def activate(self, x):
         a = math.tanh(x)
@@ -57,6 +69,19 @@ class Network():
 
         for i, neur in enumerate(self.input_neurons):
             neur.inputs = [data[i], ]
+            neur.calculate_out()
+
+        prediction = [0 for i in range(len(self.output_neurons))]
+        not_transferred = self.connections.copy()
+        while len(not_transferred) != 0:
+            for conn in not_transferred:
+                b = conn.transfer()
+                if b:
+                    not_transferred.remove(conn)
+
+        for i,out_neur in enumerate(self.output_neurons):
+            prediction[i]=out_neur.out
+        return prediction
 
 
 if __name__ == '__main__':
