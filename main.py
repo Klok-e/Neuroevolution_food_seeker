@@ -10,17 +10,17 @@ GREEN = (43, 255, 13)
 DARKGREEN = (0, 134, 6)
 GRAY = (218, 220, 214)
 SCREENRECT = pygame.Rect(0, 0, 800, 600)
-GROUND_SIZE = (800, 800)
-SIZE_OF_SEEKER = 5
-SIZE_OF_FOOD = 10
+GROUND_SIZE = (700, 500)
+SIZE_OF_SEEKER = 15
+SIZE_OF_FOOD = 15
 FPS = 30
-START_POPULATION = 100
-SPAWN_FOOD_FRAMES = 80
+START_POPULATION = 20
+SPAWN_FOOD_FRAMES = 200
 FOOD_VALUE = 500
 
 rotate_leftright = "leftright"
-speed_multiplier = 'multiplier'
-action_choices = [rotate_leftright, speed_multiplier]
+speed = 'speed'
+action_choices = [rotate_leftright, speed]
 
 
 def dist_between_points(point1, point2):
@@ -147,25 +147,53 @@ class AI():
 
         self.model = self._build_model()
         if ancestor_ai != None:
-            pass
+            weights = ancestor_ai.model.get_weights()
+            weights = self.mutate_weights(weights)
+            self.model.set_weights(weights)
+
+    def get_action(self, s):
+        #print(s, 's')
+        actions = self.model.predict(s)
+        #print(actions)
+        return actions
 
     def _build_model(self):
         # Neural Net for Deep-Q learning Model
         model = keras.models.Sequential()
 
-        model.add(keras.layers.Dense(2 ** 4, input_dim=self.state_size[1], activation='relu'))
-        model.add(keras.layers.Dense(2 ** 4, activation='relu'))
+        # print(self.state_size,'st_size')
+        model.add(keras.layers.Dense(2 ** 2, input_dim=self.state_size[1], activation='relu'))
+        model.add(keras.layers.Dense(2 ** 2, activation='relu'))
 
-        model.add(keras.layers.Dense(self.action_size, activation='linear'))
+        model.add(keras.layers.Dense(self.action_size, activation='tanh'))
 
         model.compile(loss='mse', optimizer=keras.optimizers.Adam(lr=self.learning_rate))
-        # model.summary()
-
+        #model.summary()
+        # print(model.get_weights())
+        # self.mutate_weights(model.get_weights())
+        # 1/0
         return model
+
+    def mutate_weights(self, weights):
+        flag = 0  # 0 - connection, 1 - neuron
+        for arr in weights:
+            if flag == 0:
+                flag = 1
+                for neuron_connections in arr:
+                    for i, conn in enumerate(neuron_connections):
+                        if random.random() <= (1 / (len(arr) * len(neuron_connections))) / 4:
+                            neuron_connections[i] += random.uniform(-0.5, 0.5)
+                            if random.random() <= 0.2:
+                                neuron_connections[i] = random.uniform(-2, 2)
+            else:
+                flag = 0
+        # print(weights)
+        return weights
 
 
 class Food(pygame.sprite.Sprite):
-    frames_passed = 0
+    frames_passed = SPAWN_FOOD_FRAMES
+    frames_to_vanish = SPAWN_FOOD_FRAMES+5
 
     def __init__(self, pos):
         super().__init__()
@@ -174,10 +202,16 @@ class Food(pygame.sprite.Sprite):
                                             (SIZE_OF_FOOD, SIZE_OF_FOOD))
         self.rect = self.image.get_rect(center=pos)
         self.radius = SIZE_OF_FOOD // 2
+        self.left_to_vanish = self.frames_to_vanish
+
+    def update(self):
+        self.left_to_vanish -= 1
+        if self.left_to_vanish <= 0:
+            self.kill()
 
     @staticmethod
     def spawn_food(food_group):
-        if Food.frames_passed > SPAWN_FOOD_FRAMES:
+        if Food.frames_passed > SPAWN_FOOD_FRAMES or len(food_group)==0:
             Food.frames_passed = 0
             x, y = random.randrange(GROUND_SIZE[0]), random.randrange(GROUND_SIZE[1])
             food_group.add(Food((x, y)))
@@ -185,59 +219,75 @@ class Food(pygame.sprite.Sprite):
 
 
 class Seeker(pygame.sprite.Sprite):
-    start_energy = 1000
+    start_energy = 100
     needed_energy_to_breed = 150
-    energy_decay_factor = 1
+    energy_decay_factor = 0.1
     seekers_gets_inf_about = 3
+    speed_multiplier = 10
+    angle_change_multiplier = 5
 
-    def __init__(self, pos, food_group, seekers_group):
+
+    def __init__(self, pos, food_group, seekers_group, ancestor_ai=None):
         super().__init__()
         self.original_img = pygame.image.load('images\seeker.jpg').convert()
         self.original_img = pygame.transform.scale(self.original_img,
                                                    (SIZE_OF_SEEKER, SIZE_OF_SEEKER))
         self.image = self.original_img.copy()
-        self.rect: pygame.Rect = self.original_img.get_rect(center=pos)
+        self.rect = self.original_img.get_rect(center=pos)
         self.radius = SIZE_OF_SEEKER // 2
         self.pos = pos
         self.vector = Vector2((0, 1))
         self.speed = 0
         self.energy = Seeker.start_energy
 
-        s_size = self.get_state(food_group, seekers_group).shape[1]
-        self.ai = AI(s_size)
+        # s_size = self.get_state(food_group, seekers_group).shape
+        s_size = (1, 2)  # TODO: this
+
+        # print(s_size)
+        self.ai = AI(s_size, ancestor_ai if ancestor_ai != None else None)
 
     def get_state(self, food_group, seekers_group):
         data = []
 
         data_food = []
-        dists = []
-        angles = []
+        closest = [-1, -1]  # [0] - distance, [1] - angle
         for food in food_group:
             a = food.rect.center
             b = self.pos
-            dists.append(dist_between_points(a, b))
-            angles.append(math.atan2(a[1] - b[1], a[0] - b[0]))
-        data_food.append(min(dists))
-        data_food.append(angles[dists.index(min(dists))])
 
+            dist = round(dist_between_points(a, b))
+            closest[0] = dist if closest[0] > dist or closest[0] == -1 else closest[0]
+            ang = math.atan2(a[1] - b[1], a[0] - b[0])
+            closest[1] = ang if closest[0] == dist else closest[1]
+        data_food.extend(closest)
+
+        '''
         data_seekers = []
-        dists = []
-        angles = []
+        dists_s = []
+        angles_s = []
         for seeker in seekers_group:
             a = seeker.pos
             b = self.pos
-            dists.append(dist_between_points(a, b))
-            angles.append(math.atan2(a[1] - b[1], a[0] - b[0]))
-        for i in range(Seeker.seekers_gets_inf_about):
-            min_dist_ind = dists.index(min(dists))
-            data_seekers.append(dists.pop(min_dist_ind))
-            data_seekers.append(angles[min_dist_ind])
+            dists_s.append(dist_between_points(a, b))
+            angles_s.append(math.atan2(a[1] - b[1], a[0] - b[0]))
 
-        data.extend(data_seekers)
+        for i in range(Seeker.seekers_gets_inf_about):
+            min_dist_ind = dists_s.index(min(dists_s))
+            data_seekers.append(dists_s.pop(min_dist_ind))
+            data_seekers.append(angles_s[min_dist_ind])'''
+
+        # data.extend(data_seekers)
         data.extend(data_food)
+        # print(data, 'dddd')
+        # data.extend([0 for i in range((Seeker.seekers_gets_inf_about * 2) + 2)])
+
+        # print(data)
 
         data = np.array(data)
+        # data.resize(8)
         data = data.reshape(1, data.shape[0])
+
+        # print(data.shape)
         return data
 
     def rotate_to_selfangle(self):
@@ -252,12 +302,22 @@ class Seeker(pygame.sprite.Sprite):
 
     def update(self, food_group, seekers_group):
         self.lose_energy(abs(self.speed * Seeker.energy_decay_factor))
+        self.lose_energy(0.1)
         self.rotate_to_selfangle()
         self.pos = self.move()
 
+        self.eat(food_group)
         self.breed(food_group, seekers_group)
 
         s = self.get_state(food_group, seekers_group)
+        a = self.ai.get_action(s)
+        self.perform_action(a)
+
+    def perform_action(self, a):
+        # print(a.shape,a,'act')
+        self.speed = a[0][1] * self.speed_multiplier
+        #if self.speed > self.max_speed: self.speed = self.max_speed
+        self.vector.change_angle_by(a[0][0] * self.angle_change_multiplier)
 
     def lose_energy(self, energy):
         self.energy -= energy
@@ -272,9 +332,9 @@ class Seeker(pygame.sprite.Sprite):
                 self.energy += FOOD_VALUE
 
     def breed(self, food_group, seekers_group):
-        if self.energy > Seeker.needed_energy_to_breed * 1.3:
-            for i in range(self.energy // Seeker.needed_energy_to_breed):
-                seekers_group.add(Seeker(self.pos, food_group, seekers_group))
+        if self.energy > int(Seeker.needed_energy_to_breed * 1.3):
+            seekers_group.add(Seeker(self.pos, food_group, seekers_group, self.ai))
+            self.lose_energy(Seeker.needed_energy_to_breed)
 
     def move(self):
         dx, dy = self.vector.get_componenXY()
@@ -316,21 +376,28 @@ def main():
     textobj = pygame.font.Font(None, 50)
 
     def physics_step():
-        global frames_passed
         # move the camera
         camera.move()
 
         # update
         seekers.update(food, seekers)
 
+        food.update()
+
+        if len(seekers) == 0:
+            for i in range(START_POPULATION):
+                x, y = random.randrange(GROUND_SIZE[0]), random.randrange(GROUND_SIZE[1])
+                seekers.add(Seeker((x, y), food, seekers))
+
         # spawn food
         Food.spawn_food(food)
 
     def drawing_step():
-
         # draw a ground
+
         display_surf.fill(DARKGREEN)
         display_surf.blit(ground, camera.get_plgrsurf_pos())
+        ground.fill(GRAY)
 
         # draw seekers
         seekers.draw(ground)
