@@ -3,7 +3,7 @@ import random
 import math
 import pygame
 
-CHANCE_MUTATION = 0.3
+CHANCE_MUTATION = 0.5
 CHANCE_ADD_CONNECTION = 0.3
 CHANCE_REMOVE_CONNECTION = 0.3
 CHANCE_ADD_NEURON = 0.2
@@ -37,10 +37,12 @@ class Connection():
     def transfer(self):
         if self.from_neuron.out != None:
             self.to_neuron.inputs.append(self.from_neuron.out * self.weight)
+
             self.from_neuron.transferred += 1
             if self.from_neuron.transferred == len(self.from_neuron.out_connections):
                 self.from_neuron.out = None  # indicates that output has been transferred
                 self.from_neuron.transferred = 0
+
             return True
         return False
 
@@ -71,9 +73,11 @@ class Neuron():
 
         self.inputs = []
         self.out = None
-        if self.bias: self.out = self.bias_out
+        # if self.bias: self.out = Neuron.bias_out
 
     def calculate_out(self):
+        if self.bias:
+            self.out = Neuron.bias_out
         if len(self.inputs) == len(self.in_connections) or self.is_input_neur:
             su = 0
             for numb in self.inputs:
@@ -101,6 +105,10 @@ class Network():
 
         self.h_neurons = []
         self.connections = []
+        # make all input neurons connected to output
+        for inp in self.input_neurons:
+            for out in self.output_neurons:
+                self.connections.append(Connection(inp, out))
 
     def predict(self, data):
         if len(data) != len(self.input_neurons) - 1:
@@ -109,11 +117,14 @@ class Network():
         for i in range(len(self.input_neurons) - 1):
             neur = self.input_neurons[i]
             neur.inputs = [data[i], ]
+        for neur in self.input_neurons:
             neur.calculate_out()
 
         prediction = [0 for i in range(len(self.output_neurons))]
         not_transferred = self.connections.copy()
         while len(not_transferred) != 0:
+            for neur in self.h_neurons:
+                neur.calculate_out()
             for conn in not_transferred:
                 b = conn.transfer()
                 if b:
@@ -127,7 +138,11 @@ class Network():
     def set_structure(self, struct):
         self.input_neurons, self.h_neurons, self.output_neurons, self.connections = struct
 
-    def get_structure_data(self):
+    def get_structure(self):
+        struct = self.input_neurons, self.h_neurons, self.output_neurons, self.connections
+        return struct
+
+    def get_copy_structure_data(self):
         input_neurons = [Neuron(input_neur=True) for neu in self.input_neurons]
         h_neurons = [Neuron() for neu in self.h_neurons]
         output_neurons = [Neuron(output_neur=True) for neu in self.output_neurons]
@@ -135,7 +150,7 @@ class Network():
         connections = [0 for conn in self.connections]
 
         for i, conn in enumerate(self.connections):
-            if conn.from_neuron.is_input_neur:
+            if conn.from_neuron.is_input_neur or conn.from_neuron.bias:
                 if conn.to_neuron.is_output_neur:
                     connections[i] = Connection(input_neurons[self.input_neurons.index(conn.from_neuron)],
                                                 output_neurons[self.output_neurons.index(conn.to_neuron)],
@@ -158,7 +173,7 @@ class Network():
 
     def create_offspring(self):
         offspring = Network(len(self.input_neurons) - 1, len(self.output_neurons))
-        offspring.set_structure(self.get_structure_data())
+        offspring.set_structure(self.get_copy_structure_data())
 
         if random.random() < CHANCE_MUTATION:
             while True:
@@ -215,18 +230,93 @@ class Network():
         pass
 
     def __str__(self):
-        data = self.get_structure_data()
-        return str((list(map(str, data[0])), list(map(str, data[1])), list(map(str, data[2])), list(map(str, data[3]))))
+        data = self.get_structure()
+        return '\n' + str(list(map(str, data[0]))) + '\n' + \
+               str(list(map(str, data[1]))) + '\n' + \
+               str(list(map(str, data[2]))) + '\n' + \
+               str(list(map(str, data[3]))) + '\n'
+
+
+class Agent():
+    def __init__(self, state_size, action_size, network=None):
+        self.fitness = 0
+        self.state_size = state_size
+        self.action_size = action_size
+        if network == None:
+            self.network = Network(state_size, action_size)
+        else:
+            self.network = network
+
+    def act(self, s):
+        act_values = self.network.predict(s)
+        return np.argmax(act_values)
+
+    def create_offspring(self):
+        return Agent(self.state_size, self.action_size, self.network.create_offspring())
+
+
+def evaluate_individual(individual: Agent, env):
+    state = env.reset()
+    for i in range(500):  # session length
+        #env.render()
+        action = individual.act(state)
+        state, reward, done, info = env.step(action)
+        if done:
+            # print(i, 'reward')
+            return i
+
+
+def solve_cart_pole():
+    import gym
+    population_amount = 100
+    generations_to_run = 10
+    percent_of_elitism = 0.4
+
+    env = gym.make('CartPole-v0')
+    state_size = env.observation_space.shape[0]
+    action_size = env.action_space.n
+
+    population = [Agent(state_size, action_size) for i in range(population_amount)]
+
+    def fitness_data(population):
+        mx = 0
+        su = 0
+        for agent in population:
+            if agent.fitness > mx: mx = agent.fitness
+            su += agent.fitness
+        return round(su / len(population), 2),mx
+
+    for i_generation in range(generations_to_run):
+        for agent in population:  # evaluate
+            agent.fitness = evaluate_individual(agent, env)
+        for i in range(round(population_amount - (population_amount * percent_of_elitism))):
+            a1, a2 = random.sample(population, 2)
+            if a1.fitness > a2.fitness:
+                population.remove(a2)
+                population.append(a1.create_offspring())
+            elif a2.fitness > a1.fitness:
+                population.remove(a1)
+                population.append(a2.create_offspring())
+        print('Generation {}; Avg fitness {}; Max fitness {}'.format(str(i_generation),
+                                                                     *list(map(str, fitness_data(population)))))
+    mx,ag=0,None
+    for agent in  population:
+        if agent.fitness>mx:
+            mx=agent.fitness
+            ag=agent
+    print(ag.network)
+
+
+def test():
+    n = Network(4, 2)
+    print(n)
+    p = n.predict((0.2, 0.4, -1, 0.8))
+    print(p)
+    n2 = n.create_offspring()
+    print(n2)
+    p = n2.predict((0.2, 0.4, -1, 0.8))
+    print(p)
 
 
 if __name__ == '__main__':
-    n = Network(2, 3)
-    res = n.predict((-0.2, 0.5))
-    print(res)
-
-    #print(n)
-
-    offspring = n.create_offspring()
-    #print(offspring)
-    # data = n.get_structure_data()
-    # print(list(map(str, data[0])), list(map(str, data[1])), list(map(str, data[2])), list(map(str, data[3])))
+    solve_cart_pole()
