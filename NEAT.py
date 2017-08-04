@@ -3,13 +3,14 @@ import random
 import math
 import pygame
 
-CHANCE_MUTATION = 0.5
-CHANCE_ADD_CONNECTION = 0.3
+GREEN = (43, 255, 13)
+CHANCE_MUTATION = 0.2
+CHANCE_ADD_CONNECTION = 0.9
 CHANCE_REMOVE_CONNECTION = 0.3
-CHANCE_ADD_NEURON = 0.2
-CHANCE_REMOVE_NEURON = 0.2
-CHANCE_CHANGE_WEIGHT = 0.5
-CHANCE_STRUCTURAL_CHANGE = 0.3
+CHANCE_ADD_NEURON = 0.9
+CHANCE_REMOVE_NEURON = 0.9
+CHANCE_CHANGE_WEIGHT = 0.1
+CHANCE_STRUCTURAL_CHANGE = 0.9
 
 
 class Connection():
@@ -83,14 +84,22 @@ class Neuron():
             for numb in self.inputs:
                 su += numb
             if not self.is_input_neur:  # if neuron is not input
-                self.out = self.activate(su)
+                self.out = self.activate_sin(su)
             else:
                 self.out = su
 
             self.inputs.clear()
 
-    def activate(self, x):
+    def activate_tanh(self, x):
         a = math.tanh(x)
+        return a
+
+    def activate_relu(self, x):
+        a = max(0., x)
+        return a
+
+    def activate_sin(self, x):
+        a = math.sin(x)
         return a
 
     def __str__(self):
@@ -143,7 +152,7 @@ class Network():
         return struct
 
     def get_copy_structure_data(self):
-        input_neurons = [Neuron(input_neur=True) for neu in self.input_neurons]
+        input_neurons = [Neuron(input_neur=neu.is_input_neur,bias=neu.bias) for neu in self.input_neurons]
         h_neurons = [Neuron() for neu in self.h_neurons]
         output_neurons = [Neuron(output_neur=True) for neu in self.output_neurons]
 
@@ -198,13 +207,13 @@ class Network():
                                 offspring.connections.append(Connection(n1, n2))
                                 break
                         break
-                    elif random.random() < CHANCE_REMOVE_CONNECTION:
+                    if random.random() < CHANCE_REMOVE_CONNECTION:
                         if len(offspring.connections) > 0:
                             conn = random.choice(offspring.connections)
                             conn.terminate()
                             offspring.connections.remove(conn)
                             break
-                    elif random.random() < CHANCE_ADD_NEURON:
+                    if random.random() < CHANCE_ADD_NEURON:
                         if len(offspring.connections) > 0:
                             conn = random.choice(offspring.connections)
                             n1, n2, w = conn.from_neuron, conn.to_neuron, conn.weight
@@ -215,7 +224,7 @@ class Network():
                             offspring.connections.append(Connection(n1, n3, 1))
                             offspring.connections.append(Connection(n3, n2, w))
                             break
-                    elif random.random() < CHANCE_REMOVE_NEURON:
+                    if random.random() < CHANCE_REMOVE_NEURON:
                         not_connected = []
                         for neuron in offspring.h_neurons:
                             if len(neuron.in_connections) + len(neuron.out_connections) == 0:
@@ -227,6 +236,12 @@ class Network():
         return offspring
 
     def get_image_of_network(self):
+        " image"
+        '''
+        width = 1000
+        height = 700
+        surf = pygame.Surface((width, height))
+        surf.fill(GREEN)'''
         pass
 
     def __str__(self):
@@ -249,7 +264,7 @@ class Agent():
 
     def act(self, s):
         act_values = self.network.predict(s)
-        return np.argmax(act_values)
+        return act_values
 
     def create_offspring(self):
         return Agent(self.state_size, self.action_size, self.network.create_offspring())
@@ -259,8 +274,8 @@ def evaluate_individual(individual: Agent, env):
     state = env.reset()
     for i in range(500):  # session length
         #env.render()
-        action = individual.act(state)
-        state, reward, done, info = env.step(action)
+        actions = individual.act(state)
+        state, reward, done, info = env.step(np.argmax(actions))
         if done:
             # print(i, 'reward')
             return i
@@ -268,9 +283,9 @@ def evaluate_individual(individual: Agent, env):
 
 def solve_cart_pole():
     import gym
-    population_amount = 100
-    generations_to_run = 10
-    percent_of_elitism = 0.4
+    population_amount = 20
+    generations_to_run = 5
+    percent_of_elitism = 0.5
 
     env = gym.make('CartPole-v0')
     state_size = env.observation_space.shape[0]
@@ -284,7 +299,7 @@ def solve_cart_pole():
         for agent in population:
             if agent.fitness > mx: mx = agent.fitness
             su += agent.fitness
-        return round(su / len(population), 2),mx
+        return round(su / len(population), 2), mx
 
     for i_generation in range(generations_to_run):
         for agent in population:  # evaluate
@@ -299,11 +314,11 @@ def solve_cart_pole():
                 population.append(a2.create_offspring())
         print('Generation {}; Avg fitness {}; Max fitness {}'.format(str(i_generation),
                                                                      *list(map(str, fitness_data(population)))))
-    mx,ag=0,None
-    for agent in  population:
-        if agent.fitness>mx:
-            mx=agent.fitness
-            ag=agent
+    mx, ag = 0, None
+    for agent in population:
+        if agent.fitness > mx:
+            mx = agent.fitness
+            ag = agent
     print(ag.network)
 
 

@@ -1,8 +1,8 @@
 import pygame
 import math
 import random
-import keras
 import numpy as np
+import NEAT
 
 BLACK = (0, 0, 0)
 ORANGE = (255, 174, 53)
@@ -13,10 +13,11 @@ SCREENRECT = pygame.Rect(0, 0, 800, 600)
 GROUND_SIZE = (700, 500)
 SIZE_OF_SEEKER = 15
 SIZE_OF_FOOD = 15
-FPS = 30
+FPS = 0
 START_POPULATION = 20
-SPAWN_FOOD_FRAMES = 200
+
 FOOD_VALUE = 500
+FOOD_ON_MAP = 10
 
 rotate_leftright = "leftright"
 speed = 'speed'
@@ -136,98 +137,48 @@ class Vector2(object):
         return Vector2((xx, yy))
 
 
-class AI():
-    action_size = len(action_choices)
+class AI(NEAT.Agent):
+    def __init__(self, state_size, action_size, ai=None):
+        super().__init__(state_size, action_size, ai.network if ai != None else None)
 
-    learning_rate = 0.001
-
-    def __init__(self, state_size, ancestor_ai=None):
-        self.state_size = state_size
-        self.epsilon = 0.1  # exploration rate
-
-        self.model = self._build_model()
-        if ancestor_ai != None:
-            weights = ancestor_ai.model.get_weights()
-            weights = self.mutate_weights(weights)
-            self.model.set_weights(weights)
-
-    def get_action(self, s):
-        #print(s, 's')
-        actions = self.model.predict(s)
-        #print(actions)
-        return actions
-
-    def _build_model(self):
-        # Neural Net for Deep-Q learning Model
-        model = keras.models.Sequential()
-
-        # print(self.state_size,'st_size')
-        model.add(keras.layers.Dense(2 ** 2, input_dim=self.state_size[1], activation='relu'))
-        model.add(keras.layers.Dense(2 ** 2, activation='relu'))
-
-        model.add(keras.layers.Dense(self.action_size, activation='tanh'))
-
-        model.compile(loss='mse', optimizer=keras.optimizers.Adam(lr=self.learning_rate))
-        #model.summary()
-        # print(model.get_weights())
-        # self.mutate_weights(model.get_weights())
-        # 1/0
-        return model
-
-    def mutate_weights(self, weights):
-        flag = 0  # 0 - connection, 1 - neuron
-        for arr in weights:
-            if flag == 0:
-                flag = 1
-                for neuron_connections in arr:
-                    for i, conn in enumerate(neuron_connections):
-                        if random.random() <= (1 / (len(arr) * len(neuron_connections))) / 4:
-                            neuron_connections[i] += random.uniform(-0.5, 0.5)
-                            if random.random() <= 0.2:
-                                neuron_connections[i] = random.uniform(-2, 2)
-            else:
-                flag = 0
-        # print(weights)
-        return weights
+    def act(self, s):
+        pr = self.network.predict(s)
+        return pr
 
 
 class Food(pygame.sprite.Sprite):
-    frames_passed = SPAWN_FOOD_FRAMES
-    frames_to_vanish = SPAWN_FOOD_FRAMES+5
+    AMOUNT = 0
+    POOL=FOOD_ON_MAP
+    time_passed=0
+    FOOD_RECOVER = 100
+
 
     def __init__(self, pos):
         super().__init__()
+        Food.AMOUNT += 1
+        Food.POOL-=1
         self.image = pygame.image.load(r'images\food.jpg')
         self.image = pygame.transform.scale(self.image,
                                             (SIZE_OF_FOOD, SIZE_OF_FOOD))
         self.rect = self.image.get_rect(center=pos)
         self.radius = SIZE_OF_FOOD // 2
-        self.left_to_vanish = self.frames_to_vanish
-
-    def update(self):
-        self.left_to_vanish -= 1
-        if self.left_to_vanish <= 0:
-            self.kill()
 
     @staticmethod
     def spawn_food(food_group):
-        if Food.frames_passed > SPAWN_FOOD_FRAMES or len(food_group)==0:
-            Food.frames_passed = 0
+        if Food.POOL>0:
             x, y = random.randrange(GROUND_SIZE[0]), random.randrange(GROUND_SIZE[1])
             food_group.add(Food((x, y)))
-        Food.frames_passed += 1
 
 
 class Seeker(pygame.sprite.Sprite):
     start_energy = 100
     needed_energy_to_breed = 150
-    energy_decay_factor = 0.1
+    energy_decay_factor = 0.001
     seekers_gets_inf_about = 3
     speed_multiplier = 10
     angle_change_multiplier = 5
 
-
-    def __init__(self, pos, food_group, seekers_group, ancestor_ai=None):
+    def __init__(self, pos, ancestor_ai=None):
         super().__init__()
         self.original_img = pygame.image.load('images\seeker.jpg').convert()
         self.original_img = pygame.transform.scale(self.original_img,
@@ -241,10 +192,11 @@ class Seeker(pygame.sprite.Sprite):
         self.energy = Seeker.start_energy
 
         # s_size = self.get_state(food_group, seekers_group).shape
-        s_size = (1, 2)  # TODO: this
+        s_size = 3  # TODO: this
+        a_size = 2
 
         # print(s_size)
-        self.ai = AI(s_size, ancestor_ai if ancestor_ai != None else None)
+        self.ai = AI(s_size, a_size, ancestor_ai)
 
     def get_state(self, food_group, seekers_group):
         data = []
@@ -255,7 +207,7 @@ class Seeker(pygame.sprite.Sprite):
             a = food.rect.center
             b = self.pos
 
-            dist = round(dist_between_points(a, b))
+            dist = dist_between_points(a, b)
             closest[0] = dist if closest[0] > dist or closest[0] == -1 else closest[0]
             ang = math.atan2(a[1] - b[1], a[0] - b[0])
             closest[1] = ang if closest[0] == dist else closest[1]
@@ -278,16 +230,10 @@ class Seeker(pygame.sprite.Sprite):
 
         # data.extend(data_seekers)
         data.extend(data_food)
+        data.append(self.energy)
         # print(data, 'dddd')
         # data.extend([0 for i in range((Seeker.seekers_gets_inf_about * 2) + 2)])
-
-        # print(data)
-
-        data = np.array(data)
-        # data.resize(8)
-        data = data.reshape(1, data.shape[0])
-
-        # print(data.shape)
+        #print(data)
         return data
 
     def rotate_to_selfangle(self):
@@ -302,22 +248,23 @@ class Seeker(pygame.sprite.Sprite):
 
     def update(self, food_group, seekers_group):
         self.lose_energy(abs(self.speed * Seeker.energy_decay_factor))
-        self.lose_energy(0.1)
+        self.lose_energy(Seeker.energy_decay_factor)
         self.rotate_to_selfangle()
         self.pos = self.move()
 
         self.eat(food_group)
-        self.breed(food_group, seekers_group)
+        self.breed( seekers_group)
 
         s = self.get_state(food_group, seekers_group)
-        a = self.ai.get_action(s)
+        a = self.ai.act(s)
         self.perform_action(a)
 
     def perform_action(self, a):
-        # print(a.shape,a,'act')
-        self.speed = a[0][1] * self.speed_multiplier
-        #if self.speed > self.max_speed: self.speed = self.max_speed
-        self.vector.change_angle_by(a[0][0] * self.angle_change_multiplier)
+        #print(a,'act')
+
+        self.speed = a[0] * self.speed_multiplier
+        # if self.speed > self.max_speed: self.speed = self.max_speed
+        self.vector.change_angle_by(a[1] * self.angle_change_multiplier)
 
     def lose_energy(self, energy):
         self.energy -= energy
@@ -329,11 +276,12 @@ class Seeker(pygame.sprite.Sprite):
             collide = pygame.sprite.collide_circle(self, food)
             if collide:
                 food.kill()
+                Food.AMOUNT -= 1
                 self.energy += FOOD_VALUE
 
-    def breed(self, food_group, seekers_group):
+    def breed(self, seekers_group):
         if self.energy > int(Seeker.needed_energy_to_breed * 1.3):
-            seekers_group.add(Seeker(self.pos, food_group, seekers_group, self.ai))
+            seekers_group.add(Seeker(self.pos, self.ai.create_offspring()))
             self.lose_energy(Seeker.needed_energy_to_breed)
 
     def move(self):
@@ -361,11 +309,6 @@ def main():
     seekers = pygame.sprite.Group()
     food = pygame.sprite.Group()
 
-    # create population
-    for i in range(START_POPULATION):
-        x, y = random.randrange(GROUND_SIZE[0]), random.randrange(GROUND_SIZE[1])
-        seekers.add(Seeker((x, y), food, seekers))
-
     # clock
     timer = pygame.time.Clock()
 
@@ -374,6 +317,12 @@ def main():
 
     # font for displaying text
     textobj = pygame.font.Font(None, 50)
+
+    def create_population():
+        if len(seekers) == 0:
+            for i in range(START_POPULATION):
+                x, y = random.randrange(GROUND_SIZE[0]), random.randrange(GROUND_SIZE[1])
+                seekers.add(Seeker((x, y)))
 
     def physics_step():
         # move the camera
@@ -384,12 +333,16 @@ def main():
 
         food.update()
 
-        if len(seekers) == 0:
-            for i in range(START_POPULATION):
-                x, y = random.randrange(GROUND_SIZE[0]), random.randrange(GROUND_SIZE[1])
-                seekers.add(Seeker((x, y), food, seekers))
+        # create population
+        create_population()
 
         # spawn food
+        Food.time_passed += 1
+        if Food.time_passed > Food.FOOD_RECOVER:
+            Food.time_passed = 0
+            Food.POOL += 1
+            if Food.POOL > FOOD_ON_MAP:
+                Food.POOL = FOOD_ON_MAP
         Food.spawn_food(food)
 
     def drawing_step():
