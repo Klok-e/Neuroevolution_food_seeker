@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/Neuroevolution_food_seeker.iml" filepath="$PROJECT_DIR$/.idea/Neuroevolution_food_seeker.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../dreamgame/.idea/dreamgame.iml" filepath="$PROJECT_DIR$/../dreamgame/.idea/dreamgame.iml" />
     </modules>
   </component>
 </project>

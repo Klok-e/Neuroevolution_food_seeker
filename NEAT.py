@@ -3,14 +3,7 @@ import random
 import math
 import pygame
 
-GREEN = (43, 255, 13)
-CHANCE_MUTATION = 0.2
-CHANCE_ADD_CONNECTION = 0.9
-CHANCE_REMOVE_CONNECTION = 0.3
-CHANCE_ADD_NEURON = 0.9
-CHANCE_REMOVE_NEURON = 0.9
-CHANCE_CHANGE_WEIGHT = 0.1
-CHANCE_STRUCTURAL_CHANGE = 0.9
+from config import *
 
 
 class Connection():
@@ -83,8 +76,10 @@ class Neuron():
             su = 0
             for numb in self.inputs:
                 su += numb
-            if not self.is_input_neur:  # if neuron is not input
-                self.out = self.activate_sin(su)
+            if self.is_output_neur:  # if neuron is not input (input has no activation)
+                self.out = self.activate_tanh(su)
+            if not self.is_input_neur and not self.is_output_neur and not self.bias:  # if is in hidden layer
+                self.out = self.activate_relu(su)
             else:
                 self.out = su
 
@@ -100,6 +95,10 @@ class Neuron():
 
     def activate_sin(self, x):
         a = math.sin(x)
+        return a
+
+    def activate_linear(self, x):
+        a = x
         return a
 
     def __str__(self):
@@ -152,7 +151,7 @@ class Network():
         return struct
 
     def get_copy_structure_data(self):
-        input_neurons = [Neuron(input_neur=neu.is_input_neur,bias=neu.bias) for neu in self.input_neurons]
+        input_neurons = [Neuron(input_neur=neu.is_input_neur, bias=neu.bias) for neu in self.input_neurons]
         h_neurons = [Neuron() for neu in self.h_neurons]
         output_neurons = [Neuron(output_neur=True) for neu in self.output_neurons]
 
@@ -185,64 +184,80 @@ class Network():
         offspring.set_structure(self.get_copy_structure_data())
 
         if random.random() < CHANCE_MUTATION:
-            while True:
-                if random.random() < CHANCE_CHANGE_WEIGHT:
-                    if len(offspring.connections) > 0:
-                        random.choice(offspring.connections).mutate_weight()
-                        break
-                if random.random() < CHANCE_STRUCTURAL_CHANGE:
-                    if random.random() < CHANCE_ADD_CONNECTION:
-                        all_neurons = offspring.input_neurons + offspring.h_neurons + offspring.output_neurons
-                        while True:
-                            n1, n2 = random.choices(all_neurons, k=2)
-                            if n1.is_input_neur and n2.is_input_neur:
-                                continue
-                            elif n1.is_output_neur and n2.is_output_neur:
-                                continue
-                            elif n1.is_output_neur:  # output can't be the first neuron
-                                continue
-                            elif n2.is_input_neur:  # input can't be the second neuron
-                                continue
-                            else:
-                                offspring.connections.append(Connection(n1, n2))
+            if random.random() < CHANCE_CHANGE_WEIGHT:
+                if len(offspring.connections) > 0:
+                    random.choice(offspring.connections).mutate_weight()
+
+            if random.random() < CHANCE_STRUCTURAL_CHANGE:
+                if random.random() < CHANCE_ADD_CONNECTION:
+                    all_neurons = offspring.input_neurons + offspring.h_neurons + offspring.output_neurons
+                    n1, n2 = random.sample(all_neurons, 2)
+                    if n1.is_input_neur and n2.is_input_neur:
+                        pass
+                    elif n1.is_output_neur and n2.is_output_neur:
+                        pass
+                    elif n1.is_output_neur:  # output can't be the first neuron
+                        pass
+                    elif n2.is_input_neur or n2.bias:  # input can't be the second neuron
+                        pass
+                    elif n1 == n2:  # can't be the same neuron
+                        pass
+                    else:
+                        # neurons can't be connected recursively
+                        rec = False
+                        for c in n1.out_connections:
+                            if c in n2.in_connections:
+                                rec = True
                                 break
-                        break
-                    if random.random() < CHANCE_REMOVE_CONNECTION:
-                        if len(offspring.connections) > 0:
-                            conn = random.choice(offspring.connections)
-                            conn.terminate()
-                            offspring.connections.remove(conn)
-                            break
-                    if random.random() < CHANCE_ADD_NEURON:
-                        if len(offspring.connections) > 0:
-                            conn = random.choice(offspring.connections)
-                            n1, n2, w = conn.from_neuron, conn.to_neuron, conn.weight
-                            conn.terminate()
-                            offspring.connections.remove(conn)
-                            n3 = Neuron()
-                            offspring.h_neurons.append(n3)
-                            offspring.connections.append(Connection(n1, n3, 1))
-                            offspring.connections.append(Connection(n3, n2, w))
-                            break
-                    if random.random() < CHANCE_REMOVE_NEURON:
-                        not_connected = []
-                        for neuron in offspring.h_neurons:
-                            if len(neuron.in_connections) + len(neuron.out_connections) == 0:
-                                not_connected.append(neuron)
-                        if len(not_connected) != 0:
-                            to_remove = random.choice(not_connected)
-                            offspring.h_neurons.remove(to_remove)
-                            break
+                        for c in n2.out_connections:
+                            if c in n1.in_connections:
+                                rec = True
+                                break
+                        if not rec:
+                            offspring.connections.append(Connection(n1, n2))
+
+                if random.random() < CHANCE_REMOVE_CONNECTION:
+                    if len(offspring.connections) > 0:
+                        conn = random.choice(offspring.connections)
+                        conn.terminate()
+                        offspring.connections.remove(conn)
+
+                if random.random() < CHANCE_ADD_NEURON:
+                    if len(offspring.connections) > 0:
+                        conn = random.choice(offspring.connections)
+                        n1, n2, w = conn.from_neuron, conn.to_neuron, conn.weight
+                        conn.terminate()
+                        offspring.connections.remove(conn)
+                        n3 = Neuron()
+                        offspring.h_neurons.append(n3)
+                        offspring.connections.append(Connection(n1, n3, 1))
+                        offspring.connections.append(Connection(n3, n2, w))
+
+                if random.random() < CHANCE_REMOVE_NEURON:
+                    not_connected = []
+                    for neuron in offspring.h_neurons:
+                        if len(neuron.in_connections) + len(neuron.out_connections) == 0:
+                            not_connected.append(neuron)
+                    if len(not_connected) != 0:
+                        to_remove = random.choice(not_connected)
+                        offspring.h_neurons.remove(to_remove)
+
         return offspring
 
     def get_image_of_network(self):
         " image"
-        '''
-        width = 1000
-        height = 700
+        width = 500
+        height = 350
+        x_inp = 20
         surf = pygame.Surface((width, height))
-        surf.fill(GREEN)'''
-        pass
+        surf.fill(GREEN)
+
+        dist = height // len(self.input_neurons)
+        not_drawed = len(self.input_neurons)
+        for y_inp in range(0, height, dist):
+            not_drawed -= 1
+            pygame.draw.rect(surf, GRAY, pygame.Rect(x_inp, y_inp, 10, 10))
+        return surf
 
     def __str__(self):
         data = self.get_structure()
@@ -270,31 +285,34 @@ class Agent():
         return Agent(self.state_size, self.action_size, self.network.create_offspring())
 
 
-def evaluate_individual(individual: Agent, env):
-    state = env.reset()
-    for i in range(500):  # session length
-        #env.render()
-        actions = individual.act(state)
-        state, reward, done, info = env.step(np.argmax(actions))
-        if done:
-            # print(i, 'reward')
-            return i
-
-
 def solve_cart_pole():
-    import gym
-    population_amount = 20
-    generations_to_run = 5
-    percent_of_elitism = 0.5
+    def evaluate_individual(individual: Agent, env):
+        state = env.reset()
+        r = 0
+        for i in range(500):  # session length
+            # env.render()
+            actions = individual.act(state)
+            state, reward, done, info = env.step(np.argmax(actions))
+            r += reward
+            if done:
+                # print(r, 'reward')
+                return r
 
-    env = gym.make('CartPole-v0')
+    import gym
+    population_amount = 100
+    generations_to_run = 40
+    percent_of_elitism = 0.4
+
+    env = gym.make('MountainCar-v0')
+
     state_size = env.observation_space.shape[0]
     action_size = env.action_space.n
+    # print(state_size,action_size)
 
     population = [Agent(state_size, action_size) for i in range(population_amount)]
 
     def fitness_data(population):
-        mx = 0
+        mx = -1000
         su = 0
         for agent in population:
             if agent.fitness > mx: mx = agent.fitness
@@ -314,24 +332,41 @@ def solve_cart_pole():
                 population.append(a2.create_offspring())
         print('Generation {}; Avg fitness {}; Max fitness {}'.format(str(i_generation),
                                                                      *list(map(str, fitness_data(population)))))
-    mx, ag = 0, None
+    mx, ag = -1000, None
+    fle = open('log\structures_of_final_generation.txt', 'w')
     for agent in population:
+        fle.write(str(agent.network))
         if agent.fitness > mx:
             mx = agent.fitness
             ag = agent
+    fle.close()
     print(ag.network)
 
 
 def test():
     n = Network(4, 2)
-    print(n)
+    # print(n)
     p = n.predict((0.2, 0.4, -1, 0.8))
-    print(p)
+    # print(p)
     n2 = n.create_offspring()
-    print(n2)
+    # print(n2)
     p = n2.predict((0.2, 0.4, -1, 0.8))
-    print(p)
+    # print(p)
+
+    pygame.init()
+    display_surf = pygame.display.set_mode((800, 600))
+    timer = pygame.time.Clock()
+
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
+                return
+        s = n2.get_image_of_network()
+        display_surf.blit(s, (0, 0))
+
+        timer.tick(60)
 
 
 if __name__ == '__main__':
     solve_cart_pole()
+    # test()

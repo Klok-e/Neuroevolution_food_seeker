@@ -4,24 +4,7 @@ import random
 import numpy as np
 import NEAT
 
-BLACK = (0, 0, 0)
-ORANGE = (255, 174, 53)
-GREEN = (43, 255, 13)
-DARKGREEN = (0, 134, 6)
-GRAY = (218, 220, 214)
-SCREENRECT = pygame.Rect(0, 0, 800, 600)
-GROUND_SIZE = (700, 500)
-SIZE_OF_SEEKER = 15
-SIZE_OF_FOOD = 15
-FPS = 0
-START_POPULATION = 20
-
-FOOD_VALUE = 500
-FOOD_ON_MAP = 10
-
-rotate_leftright = "leftright"
-speed = 'speed'
-action_choices = [rotate_leftright, speed]
+from config import *
 
 
 def dist_between_points(point1, point2):
@@ -165,15 +148,16 @@ class Food(pygame.sprite.Sprite):
 
     @staticmethod
     def spawn_food(food_group):
-        if Food.POOL>0:
-            x, y = random.randrange(GROUND_SIZE[0]), random.randrange(GROUND_SIZE[1])
-            food_group.add(Food((x, y)))
+        if Food.AMOUNT<FOOD_ON_MAP:
+            if Food.POOL>0:
+                x, y = random.randrange(GROUND_SIZE[0]), random.randrange(GROUND_SIZE[1])
+                food_group.add(Food((x, y)))
 
 
 class Seeker(pygame.sprite.Sprite):
     start_energy = 100
     needed_energy_to_breed = 150
-    energy_decay_factor = 0.001
+    energy_decay_factor = 0.1
     seekers_gets_inf_about = 3
     speed_multiplier = 10
     angle_change_multiplier = 5
